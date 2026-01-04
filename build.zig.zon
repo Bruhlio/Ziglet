@@ -2,11 +2,10 @@
     .name = .ziglet,
     .fingerprint = 0x27874d01c1f96faf,
     .version = "0.0.0",
-
     .dependencies = .{
         .nexlog = .{
-            .url = "git+https://github.com/chrischtel/nexlog?ref=develop#28f0d766be55f922f0e4d340a8c14cf6c10c2f08",
-            .hash = "1220ea04de9ed19f6a8f8b9cfac277c8ab4e46ffdc7d9affe83d649159ff5143c669",
+            .url = "git+https://github.com/chrischtel/nexlog.git#34f96f867315b28c93869c1eb379732b6556563b",
+            .hash = "nexlog-0.7.1-zfPDxMODAgCNyxp4x3xPp2V8Dx4mJ38GYHv4943DuNtu",
         },
     },
 
