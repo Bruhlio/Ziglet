@@ -118,7 +118,7 @@ pub const Instructions = struct {
     /// PUSH Rx – Push register value to stack.
     pub fn push(registers: []u32, vm: *VM, src: u8) VMError!void {
         try validateRegister(src);
-        try vm.stack.append(registers[src]);
+        try vm.stack.append(vm.allocator,registers[src]);
         vm.sp += 1;
     }
 

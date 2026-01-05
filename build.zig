@@ -5,14 +5,17 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // The main library
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "ziglet",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     b.installArtifact(lib);
-
+    
     // setup logging
     const nexlog_dep = b.dependency("nexlog", .{
         .target = target,
@@ -30,11 +33,13 @@ pub fn build(b: *std.Build) void {
 
     // Unit tests
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
-
+    
     lib_unit_tests.root_module.addImport("nexlog", nexlog_dep.module("nexlog"));
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -65,12 +70,15 @@ pub fn build(b: *std.Build) void {
     {
         for (examples) |example| {
             const exe = b.addExecutable(.{
-                .name = example.name,
-                .target = target,
-                .optimize = optimize,
-                .root_source_file = b.path(example.path),
+               .name = example.name,
+               .root_module = b.createModule(.{
+                 .root_source_file = b.path(example.path),
+                 .target = target,
+                 .optimize = optimize,
+              }), 
             });
-            exe.root_module.addImport("ziglet", ziglet_module);
+            
+            b.installArtifact(exe);
 
             if (example.libc) {
                 exe.linkLibC();

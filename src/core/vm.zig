@@ -89,7 +89,7 @@ pub const VM = struct {
             .program = &[_]Instruction{},
             .allocator = allocator,
             .running = false,
-            .stack = std.ArrayList(u32).init(allocator),
+            .stack = try std.ArrayList(u32).initCapacity(allocator, 0),
             .sp = 0,
             .cmp_flag = 0,
             .memory = memory,
@@ -134,7 +134,7 @@ pub const VM = struct {
         const metadata = self.createLogMetadata();
         self.logger.info("VM shutting down", .{}, metadata);
         self.allocator.free(self.memory);
-        self.stack.deinit();
+        self.stack.deinit(self.allocator);
         self.instruction_cache.deinit();
         self.execution_count.deinit();
         self.logger.flush() catch {};
@@ -328,11 +328,11 @@ pub const VM = struct {
         const metadata = self.createLogMetadata();
         var buf: [512]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&buf);
-        var string = std.ArrayList(u8).init(fba.allocator());
-        defer string.deinit();
+        var string = std.ArrayList(u8).initBuffer(fba.buffer);
+        defer string.deinit(fba.allocator());
         for (self.registers, 0..) |reg, i| {
             if (reg != 0) {
-                string.writer().print("R{d}={d} ", .{ i, reg }) catch continue;
+                string.print(fba.allocator(), "R{d}={d} ", .{ i, reg }) catch continue;
             }
         }
         self.logger.debug("Register state: {s}", .{string.items}, metadata);

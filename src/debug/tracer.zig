@@ -43,16 +43,16 @@ pub const ExecutionTracer = struct {
         return ExecutionTracer{
             .allocator = allocator,
             .level = level,
-            .trace_buffer = std.ArrayList(TraceEntry).init(allocator),
+            .trace_buffer = try std.ArrayList(TraceEntry).initCapacity(allocator, 0),
             .timer = timer,
             .enabled = level != .none,
-            .memory_access_buffer = std.ArrayList(TraceEntry.MemoryAccess).init(allocator),
+            .memory_access_buffer = try std.ArrayList(TraceEntry.MemoryAccess).initCapacity(allocator, 0),
         };
     }
 
     pub fn deinit(self: *ExecutionTracer) void {
-        self.trace_buffer.deinit();
-        self.memory_access_buffer.deinit();
+        self.trace_buffer.deinit(self.allocator);
+        self.memory_access_buffer.deinit(self.allocator);
     }
 
     pub fn beginInstruction(self: *ExecutionTracer, vm: *const VM) void {
@@ -96,13 +96,14 @@ pub const ExecutionTracer = struct {
             }
         }
 
-        try self.trace_buffer.append(entry);
+        try self.trace_buffer.append(self.allocator, entry);
     }
 
     pub fn recordMemoryAccess(self: *ExecutionTracer, address: usize, is_write: bool, size: u8, value: u32) !void {
         if (!self.enabled or self.level != .verbose) return;
 
-        try self.memory_access_buffer.append(.{
+        try self.memory_access_buffer.append(self.allocator,
+        .{
             .address = address,
             .is_write = is_write,
             .size = size,
@@ -111,60 +112,68 @@ pub const ExecutionTracer = struct {
     }
 
     pub fn generateReport(self: *const ExecutionTracer) ![]u8 {
-        if (self.trace_buffer.items.len == 0) return &[_]u8{};
+    if (self.trace_buffer.items.len == 0) return &[_]u8{};
 
-        var buffer = std.ArrayList(u8).init(self.allocator);
-        defer buffer.deinit();
+    var buffer = try std.ArrayList(u8).initCapacity(self.allocator, 0);
+    defer buffer.deinit(self.allocator);
 
-        const writer = buffer.writer();
+    var temp_buf: [512]u8 = undefined;
 
-        try writer.print("Execution Trace ({d} instructions)\n", .{self.trace_buffer.items.len});
-        try writer.print("----------------------------------------\n", .{});
+    const line1 = try std.fmt.bufPrint(&temp_buf, "Execution Trace ({d} instructions)\n", .{self.trace_buffer.items.len});
+    try buffer.appendSlice(self.allocator,line1);
+    try buffer.appendSlice(self.allocator,"----------------------------------------\n");
 
-        for (self.trace_buffer.items, 0..) |entry, i| {
-            try writer.print("{d}: [PC={d}] {any}", .{ i, entry.pc, entry.instruction });
+    for (self.trace_buffer.items, 0..) |entry, i| {
+        const line = try std.fmt.bufPrint(&temp_buf, "{d}: [PC={d}] {any}", .{ i, entry.pc, entry.instruction });
+        try buffer.appendSlice(self.allocator, line);
 
-            if (entry.registers_before != null) {
-                try writer.print("\n  Regs before: ", .{});
-                for (entry.registers_before.?, 0..) |reg, j| {
-                    if (reg != 0) {
-                        try writer.print("R{d}={d} ", .{ j, reg });
-                    }
+        if (entry.registers_before) |regs_before| {
+            try buffer.appendSlice(self.allocator, "\n  Regs before: ");
+            for (regs_before, 0..) |reg, j| {
+                if (reg != 0) {
+                    const reg_line = try std.fmt.bufPrint(&temp_buf, "R{d}={d} ", .{ j, reg });
+                    try buffer.appendSlice(self.allocator, reg_line);
                 }
             }
-
-            if (entry.registers_after != null) {
-                try writer.print("\n  Regs after:  ", .{});
-                for (entry.registers_after.?, 0..) |reg, j| {
-                    if (reg != 0) {
-                        try writer.print("R{d}={d} ", .{ j, reg });
-                    }
-                }
-            }
-
-            if (entry.stack_depth != null) {
-                try writer.print("\n  Stack depth: {d}", .{entry.stack_depth.?});
-            }
-
-            if (entry.execution_time_ns != null) {
-                try writer.print("\n  Exec time: {d}ns", .{entry.execution_time_ns.?});
-            }
-
-            if (entry.memory_accesses != null) {
-                try writer.print("\n  Memory accesses:", .{});
-                for (entry.memory_accesses.?) |access| {
-                    try writer.print("\n    {s} addr={d} size={d} value={d}", .{
-                        if (access.is_write) "WRITE" else "READ",
-                        access.address,
-                        access.size,
-                        access.value,
-                    });
-                }
-            }
-
-            try writer.print("\n", .{});
         }
 
-        return buffer.toOwnedSlice();
+        if (entry.registers_after) |regs_after| {
+            try buffer.appendSlice(self.allocator, "\n  Regs after:  ");
+            for (regs_after, 0..) |reg, j| {
+                if (reg != 0) {
+                    const reg_line = try std.fmt.bufPrint(&temp_buf, "R{d}={d} ", .{ j, reg });
+                    try buffer.appendSlice(self.allocator, reg_line);
+                }
+            }
+        }
+
+        if (entry.stack_depth) |depth| {
+            const depth_line = try std.fmt.bufPrint(&temp_buf, "\n  Stack depth: {d}", .{depth});
+            try buffer.appendSlice(self.allocator, depth_line);
+        }
+
+        if (entry.execution_time_ns) |exec_time| {
+            const time_line = try std.fmt.bufPrint(&temp_buf, "\n  Exec time: {d}ns", .{exec_time});
+            try buffer.appendSlice(self.allocator, time_line);
+        }
+
+        if (entry.memory_accesses) |accesses| {
+            try buffer.appendSlice(self.allocator, "\n  Memory accesses:");
+            for (accesses) |access| {
+                const access_line = try std.fmt.bufPrint(&temp_buf, "\n    {s} addr={d} size={d} value={d}", .{
+                    if (access.is_write) "WRITE" else "READ",
+                    access.address,
+                    access.size,
+                    access.value,
+                });
+                try buffer.appendSlice(self.allocator, access_line);
+            }
+        }
+
+        try buffer.appendSlice(self.allocator, "\n");
     }
+
+    return try buffer.toOwnedSlice(self.allocator);
+}
+
 };

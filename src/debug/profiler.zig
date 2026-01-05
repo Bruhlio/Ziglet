@@ -118,95 +118,97 @@ pub const Profiler = struct {
     pub fn generateReport(self: *const Profiler) ![]u8 {
         if (!self.config.enabled) return &[_]u8{};
 
-        var buffer = std.ArrayList(u8).init(self.allocator);
-        defer buffer.deinit();
+        var buffer = try std.ArrayList(u8).initCapacity(self.allocator, 0);
+        defer buffer.deinit(self.allocator);
 
-        const writer = buffer.writer();
+        var temp_buf: [512]u8 = undefined;
 
-        try writer.print("VM Profiler Report\n", .{});
-        try writer.print("=================\n\n", .{});
+        try buffer.appendSlice(self.allocator, "VM Profiler Report\n");
+        try buffer.appendSlice(self.allocator, "=================\n\n");
 
         if (self.config.track_hot_instructions) {
-            try writer.print("Hot Instructions:\n", .{});
-            try writer.print("----------------\n", .{});
+            try buffer.appendSlice(self.allocator, "Hot Instructions:\n");
+            try buffer.appendSlice(self.allocator, "----------------\n");
 
             // Define the entry type first
             const InstructionEntry = struct { pc: usize, stats: InstructionStats };
 
             // Use the named type in the ArrayList
-            var entries = std.ArrayList(InstructionEntry).init(self.allocator);
-            defer entries.deinit();
+            var entries = try std.ArrayList(InstructionEntry).initCapacity(self.allocator, 0);
+            defer entries.deinit(self.allocator);
 
             var it = self.instruction_stats.iterator();
             while (it.next()) |entry| {
-                try entries.append(.{ .pc = entry.key_ptr.*, .stats = entry.value_ptr.* });
-            }
-
-            // Sort entries by execution count (descending)
-            std.sort.insertion(InstructionEntry, entries.items, {}, struct {
-                fn lessThan(_: void, a: InstructionEntry, b: InstructionEntry) bool {
-                    return a.stats.execution_count > b.stats.execution_count;
-                }
-            }.lessThan);
-
-            const show_count = @min(entries.items.len, 10);
-            for (entries.items[0..show_count], 0..) |entry, i| {
-                const avg_time = if (entry.stats.execution_count > 0)
-                    entry.stats.total_time_ns / entry.stats.execution_count
-                else
-                    0;
-
-                try writer.print("{d}: PC={d} | Count={d} | Avg={d}ns | Min={d}ns | Max={d}ns\n", .{
-                    i + 1,
-                    entry.pc,
-                    entry.stats.execution_count,
-                    avg_time,
-                    entry.stats.min_time_ns,
-                    entry.stats.max_time_ns,
-                });
-            }
-            try writer.print("\n", .{});
+                try entries.append(self.allocator,.{ .pc = entry.key_ptr.*, .stats = entry.value_ptr.* });
         }
 
-        if (self.config.track_opcode_stats) {
-            try writer.print("Opcode Statistics:\n", .{});
-            try writer.print("-----------------\n", .{});
-
-            // Define the entry type first
-            const OpcodeEntry = struct { opcode: OpCode, stats: OpcodeStats };
-
-            // Use the named type in the ArrayList
-            var entries = std.ArrayList(OpcodeEntry).init(self.allocator);
-            defer entries.deinit();
-
-            var it = self.opcode_stats.iterator();
-            while (it.next()) |entry| {
-                try entries.append(.{ .opcode = entry.key_ptr.*, .stats = entry.value_ptr.* });
+        // Sort entries by execution count (descending)
+        std.sort.insertion(InstructionEntry, entries.items, {}, struct {
+            fn lessThan(_: void, a: InstructionEntry, b: InstructionEntry) bool {
+                return a.stats.execution_count > b.stats.execution_count;
             }
+        }.lessThan);
 
-            // Sort entries by execution count (descending)
-            std.sort.insertion(OpcodeEntry, entries.items, {}, struct {
-                fn lessThan(_: void, a: OpcodeEntry, b: OpcodeEntry) bool {
-                    return a.stats.execution_count > b.stats.execution_count;
-                }
-            }.lessThan);
+        const show_count = @min(entries.items.len, 10);
+        for (entries.items[0..show_count], 0..) |entry, i| {
+            const avg_time = if (entry.stats.execution_count > 0)
+                entry.stats.total_time_ns / entry.stats.execution_count
+            else
+                0;
 
-            for (entries.items) |entry| {
-                const avg_time = if (entry.stats.execution_count > 0)
-                    entry.stats.total_time_ns / entry.stats.execution_count
-                else
-                    0;
-
-                try writer.print("{s}: Count={d} | Total={d}ns | Avg={d}ns\n", .{
-                    @tagName(entry.opcode),
-                    entry.stats.execution_count,
-                    entry.stats.total_time_ns,
-                    avg_time,
-                });
-            }
-            try writer.print("\n", .{});
+            const line = try std.fmt.bufPrint(&temp_buf, "{d}: PC={d} | Count={d} | Avg={d}ns | Min={d}ns | Max={d}ns\n", .{
+                i + 1,
+                entry.pc,
+                entry.stats.execution_count,
+                avg_time,
+                entry.stats.min_time_ns,
+                entry.stats.max_time_ns,
+            });
+            try buffer.appendSlice(self.allocator, line);
         }
-
-        return buffer.toOwnedSlice();
+        try buffer.appendSlice(self.allocator, "\n");
     }
+
+    if (self.config.track_opcode_stats) {
+        try buffer.appendSlice(self.allocator, "Opcode Statistics:\n");
+        try buffer.appendSlice(self.allocator, "-----------------\n");
+
+        // Define the entry type first
+        const OpcodeEntry = struct { opcode: OpCode, stats: OpcodeStats };
+
+        // Use the named type in the ArrayList
+        var entries = try std.ArrayList(OpcodeEntry).initCapacity(self.allocator, 0);
+        defer entries.deinit(self.allocator);
+
+        var it = self.opcode_stats.iterator();
+        while (it.next()) |entry| {
+            try entries.append(self.allocator, .{ .opcode = entry.key_ptr.*, .stats = entry.value_ptr.* });
+        }
+
+        // Sort entries by execution count (descending)
+        std.sort.insertion(OpcodeEntry, entries.items, {}, struct {
+            fn lessThan(_: void, a: OpcodeEntry, b: OpcodeEntry) bool {
+                return a.stats.execution_count > b.stats.execution_count;
+            }
+        }.lessThan);
+
+        for (entries.items) |entry| {
+            const avg_time = if (entry.stats.execution_count > 0)
+                entry.stats.total_time_ns / entry.stats.execution_count
+            else
+                0;
+
+            const line = try std.fmt.bufPrint(&temp_buf, "{s}: Count={d} | Total={d}ns | Avg={d}ns\n", .{
+                @tagName(entry.opcode),
+                entry.stats.execution_count,
+                entry.stats.total_time_ns,
+                avg_time,
+            });
+            try buffer.appendSlice(self.allocator, line);
+        }
+        try buffer.appendSlice(self.allocator, "\n");
+    }
+
+    return buffer.toOwnedSlice(self.allocator);
+}
 };

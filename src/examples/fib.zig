@@ -88,7 +88,10 @@ fn createFibProgram(
 }
 
 pub fn main() !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buffer: [256]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+    
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -102,4 +105,5 @@ pub fn main() !void {
     try vm.execute();
     const result = try vm.getRegister(3);
     try stdout.print("fib({d}) = {d}\n", .{ n, result });
+    try stdout.flush();
 }
